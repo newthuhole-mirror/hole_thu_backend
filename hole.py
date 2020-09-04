@@ -112,8 +112,6 @@ def do_post():
     cw = request.form.get('cw')
     cw =  cw.strip() if cw else None
 
-    print(content, post_type, cw)
-
     if not content or len(content) > 4096: abort(422)
     if cw and len(cw)>32: abort(422)
 
@@ -233,7 +231,6 @@ def get_attention():
     ats = Attention.query.filter_by(name_hash=hash_name(u.name), disabled=False)
 
     posts = [Post.query.get(at.pid) for at in ats.all()]
-    print(posts)
     data = [ map_post(post, u.name, 10)
             for post in posts[::-1]
                     if post and not post.deleted
@@ -293,21 +290,40 @@ def delete():
 def system_log():
     u = require_token()
 
-    ss = Syslog.query.all()
+    ss = Syslog.query.order_by(db.desc('timestamp')).limit(100).all()
 
     return {
             'start_time': app.config['START_TIME'],
-            'salt': look(app.config['SALT'][:3]),
+            'salt': look(app.config['SALT']),
             'data' : [{
                     'type': s.log_type,
                     'detail': s.log_detail,
                     'user': look(s.name_hash),
                     'timestamp': s.timestamp
-                    } for s in ss[::-1]
+                    } for s in ss
                     ]
         }
 
+@app.route('/_api/v1/report', methods=['POST'])
+def report():
+    u = require_token()
 
+    pid = request.form.get('pid')
+    if pid and pid.isdigit():
+        p = int(pid)
+    else:
+        abort(422)
+
+    reason = request.form.get('reason', '')
+
+    db.session.add(Syslog(
+            log_type='REPORT',
+            log_detail=f"pid={pid}\n{reason}",
+            name_hash=hash_name(u.name)
+        ))
+    db.session.commit()
+
+    return {'code': 0}
 
 
 if __name__ == '__main__':

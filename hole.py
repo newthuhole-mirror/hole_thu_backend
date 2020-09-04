@@ -73,8 +73,11 @@ def get_list():
     p = request.args.get('p')
     p = int(p) if p and p.isdigit() else -1
 
-    posts = Post.query.filter_by(deleted=False).order_by(db.desc('timestamp')).paginate(p, PER_PAGE)
-    
+
+    posts = Post.query.filter_by(deleted=False)
+    if 'no_cw' in request.args:
+        posts = posts.filter_by(cw=None)
+    posts = posts.order_by(db.desc('timestamp')).paginate(p, PER_PAGE)
 
     data =list(map(map_post, posts.items, [u.name] * len(posts.items)))
 

@@ -4,10 +4,10 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from mastodon import Mastodon
-import time, re, random, string, datetime, hashlib
+import re, random, string, datetime, hashlib
 
 from models import db, User, Post, Comment, Attention, Syslog
-from utils import require_token, map_post, map_comment, check_attention, hash_name
+from utils import require_token, map_post, map_comment, check_attention, hash_name, look
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -122,7 +122,6 @@ def do_post():
             content = content,
             post_type = post_type,
             cw = cw or None,
-            timestamp = int(time.time()),
             likenum = 1,
             comments = []
             )
@@ -189,7 +188,6 @@ def do_comment():
     c = Comment(
             name_hash = hash_name(u.name),
             content = content,
-            timestamp = int(time.time())
             )
     post.comments.append(c)
     db.session.commit()
@@ -265,32 +263,52 @@ def delete():
     obj = None
     if obj_type == 'pid':
         obj = Post.query.get(obj_id)
-        if len(obj.comments): abort(403)
     elif obj_type == 'cid':
         obj = Comment.query.get(obj_id)
     if not obj: abort(404)
 
     if obj.name_hash == hash_name(u.name):
+        if obj_type == 'pid' and len(obj.comments): abort(403)
         db.session.delete(obj)
     elif u.name in app.config.get('ADMINS'):
         obj.deleted = True
         db.session.add(Syslog(
             log_type='ADMIN DELETE',
-            log_detail=f"{type}={obj_id}\nnote",
+            log_detail=f"{obj_type}={obj_id}\n{note}",
             name_hash=hash_name(u.name)
             ))
         if note.startswith('!ban'):
             db.session.add(Syslog(
                 log_type='BANNED',
-                log_detail=f"{type}={obj_id}\nnote",
+                log_detail=f"=> {obj_type}={obj_id}",
                 name_hash=obj.name_hash
                 ))
-
     else:
         abort(403)
 
     db.session.commit()
     return {'code': 0}
+
+@app.route('/_api/v1/systemlog')
+def system_log():
+    u = require_token()
+
+    ss = Syslog.query.all()
+
+    return {
+            'start_time': app.config['START_TIME'],
+            'salt': look(app.config['SALT'][:3]),
+            'data' : [{
+                    'type': s.log_type,
+                    'detail': s.log_detail,
+                    'user': look(s.name_hash),
+                    'timestamp': s.timestamp
+                    } for s in ss[::-1]
+                    ]
+        }
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)

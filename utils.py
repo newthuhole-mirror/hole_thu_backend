@@ -7,9 +7,10 @@ def get_config(key):
 
 def require_token():
     token = request.args.get('user_token')
-    u = User.query.filter_by(token=token).first() if token else None
-    if Syslog.query.filter_by(log_type='BANNED', name_hash=hash_name(u.name)).first(): abort(403)
-    return u if u else abort(401)
+    if not token: abort(401)
+    u = User.query.filter_by(token=token).first()
+    if not u or Syslog.query.filter_by(log_type='BANNED', name_hash=hash_name(u.name)).first(): abort(403)
+    return u
 
 def hash_name(name):
     return hashlib.sha256((get_config('SALT') + name).encode('utf-8')).hexdigest()
@@ -54,3 +55,6 @@ def check_attention(name, pid):
 
 def check_can_del(name, author_hash):
     return 1 if hash_name(name) == author_hash or name in get_config('ADMINS') else 0
+
+def look(s):
+    return s[:3] + '...' + s[-3:]

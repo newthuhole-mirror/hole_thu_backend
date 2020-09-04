@@ -1,4 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+import time
 
 db = SQLAlchemy()
 
@@ -23,6 +24,10 @@ class Post(db.Model):
 
     comments = db.relationship('Comment', backref='post', lazy=True)
 
+    def __init__(self, **kwargs):
+        super(Post, self).__init__(**kwargs)
+        self.timestamp = int(time.time())
+
     def __repr__(self):
         return f"{self.name_hash}:[{self.content}]"
 
@@ -35,6 +40,10 @@ class Comment(db.Model):
 
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'),
         nullable=False)
+
+    def __init__(self, **kwargs):
+        super(Comment, self).__init__(**kwargs)
+        self.timestamp = int(time.time())
     
     def __repr__(self):
         return f"{self.name_hash}:[{self.content}->{self.post_id}]"
@@ -50,4 +59,8 @@ class Syslog(db.Model):
     log_type = db.Column(db.String(16))
     log_detail = db.Column(db.String(128))
     name_hash = db.Column(db.String(64))
-    
+    timestamp = db.Column(db.Integer)
+
+    def __init__(self, **kwargs):
+        super(Syslog, self).__init__(**kwargs)
+        self.timestamp = int(time.time())

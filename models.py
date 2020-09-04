@@ -44,4 +44,10 @@ class Attention(db.Model):
     name_hash = db.Column(db.String(64))
     pid = db.Column(db.Integer)
     disabled = db.Column(db.Boolean, default=False)
+
+class Syslog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    log_type = db.Column(db.String(16))
+    log_detail = db.Column(db.String(128))
+    name_hash = db.Column(db.String(64))
     

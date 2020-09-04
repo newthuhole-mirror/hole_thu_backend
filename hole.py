@@ -6,8 +6,8 @@ from flask_limiter.util import get_remote_address
 from mastodon import Mastodon
 import time, re, random, string, datetime, hashlib
 
-from models import db, User, Post, Comment, Attention
-from utils import require_token, map_post, map_comment, check_attention
+from models import db, User, Post, Comment, Attention, Syslog
+from utils import require_token, map_post, map_comment, check_attention, hash_name
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -26,10 +26,7 @@ CS_LOGIN_URL = Mastodon(api_base_url=app.config['MASTODON_URL']) \
                     redirect_uris = app.config['REDIRECT_URI'],
                     scopes = ['read:accounts']
                 )
-PER_PAGE = 25
-
-def hash_name(name):
-    return hashlib.sha256((app.config['SALT'] + name).encode('utf-8')).hexdigest()
+PER_PAGE = 50
 
 @app.route('/_login')
 def login():
@@ -76,10 +73,10 @@ def get_list():
     p = request.args.get('p')
     p = int(p) if p and p.isdigit() else -1
 
-    posts = Post.query.filter_by(deleted=False).order_by(db.desc('timestamp')).paginate(page=p, per_page=PER_PAGE)
+    posts = Post.query.filter_by(deleted=False).order_by(db.desc('timestamp')).paginate(p, PER_PAGE)
     
 
-    data =list(map(map_post, posts.items, [hash_name(u.name)] * len(posts.items)))
+    data =list(map(map_post, posts.items, [u.name] * len(posts.items)))
 
     return {
             'code': 0,
@@ -97,7 +94,7 @@ def get_one():
     if not post: abort(404)
     if post.deleted: abort(451)
 
-    data = map_post(post, name_hash=hash_name(u.name))
+    data = map_post(post, u.name)
 
     return {
             'code': 0,
@@ -161,8 +158,9 @@ def get_comment():
 
     post = Post.query.get(pid)
     if not post: abort(404)
-    
-    data = map_comment(post)
+    if post.deleted: abort(451)
+
+    data = map_comment(post, u.name)
     
     return {
             'code': 0,
@@ -182,6 +180,7 @@ def do_comment():
 
     post = Post.query.get(pid)
     if not post: abort(404)
+    if post.deleted: abort(451)
 
     content = request.form.get('text')
     content =  content.strip() if content else None
@@ -237,7 +236,7 @@ def get_attention():
 
     posts = [Post.query.get(at.pid) for at in ats.all()]
     print(posts)
-    data = [ map_post(post, hash_name(u.name), 10)
+    data = [ map_post(post, u.name, 10)
             for post in posts[::-1]
                     if post and not post.deleted
         ]
@@ -248,6 +247,50 @@ def get_attention():
             'data': data
         }
 
+@app.route('/_api/v1/delete', methods=['POST'])
+def delete():
+    u = require_token()
+
+    obj_type = request.form.get('type')
+    obj_id = request.form.get('id')
+    note = request.form.get('note')
+
+    if obj_id and obj_id.isdigit():
+        obj_id = int(obj_id)
+    else:
+        abort(422)
+
+    if note and len(note)>100: abort(422)
+
+    obj = None
+    if obj_type == 'pid':
+        obj = Post.query.get(obj_id)
+        if len(obj.comments): abort(403)
+    elif obj_type == 'cid':
+        obj = Comment.query.get(obj_id)
+    if not obj: abort(404)
+
+    if obj.name_hash == hash_name(u.name):
+        db.session.delete(obj)
+    elif u.name in app.config.get('ADMINS'):
+        obj.deleted = True
+        db.session.add(Syslog(
+            log_type='ADMIN DELETE',
+            log_detail=f"{type}={obj_id}\nnote",
+            name_hash=hash_name(u.name)
+            ))
+        if note.startswith('!ban'):
+            db.session.add(Syslog(
+                log_type='BANNED',
+                log_detail=f"{type}={obj_id}\nnote",
+                name_hash=obj.name_hash
+                ))
+
+    else:
+        abort(403)
+
+    db.session.commit()
+    return {'code': 0}
 
 if __name__ == '__main__':
     app.run(debug=True)

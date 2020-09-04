@@ -1,13 +1,20 @@
 import hashlib
-from flask import request, abort
-from models import User, Attention
+from flask import request, abort, current_app
+from models import User, Attention, Syslog
+
+def get_config(key):
+    return current_app.config.get(key)
 
 def require_token():
     token = request.args.get('user_token')
     u = User.query.filter_by(token=token).first() if token else None
+    if Syslog.query.filter_by(log_type='BANNED', name_hash=hash_name(u.name)).first(): abort(403)
     return u if u else abort(401)
 
-def map_post(p, name_hash, mc=50):
+def hash_name(name):
+    return hashlib.sha256((get_config('SALT') + name).encode('utf-8')).hexdigest()
+
+def map_post(p, name, mc=50):
     return {
             'pid': p.id,
             'likenum': p.likenum,
@@ -17,11 +24,12 @@ def map_post(p, name_hash, mc=50):
             'type' : p.post_type,
             'url' : p.file_url,
             'reply': len(p.comments),
-            'comments': map_comment(p) if len(p.comments) < mc else None,
-            'attention': check_attention(name_hash, p.id)
+            'comments': map_comment(p, name) if len(p.comments) < mc else None,
+            'attention': check_attention(name, p.id),
+            'can_del': check_can_del(name, p.name_hash)
         }
 
-def map_comment(p):
+def map_comment(p, name):
 
     names = {p.name_hash: 0}
 
@@ -36,10 +44,13 @@ def map_comment(p):
         'pid': p.id,
         'text': c.content,
         'timestamp': c.timestamp,
-        #'cw': None  # comments may have cw in future
-        } for c in p.comments
+        'can_del': check_can_del(name, c.name_hash)
+        } for c in p.comments if not c.deleted
     ]
 
-def check_attention(name_hash, pid):
-    at = Attention.query.filter_by(name_hash=name_hash, pid=pid, disabled=False).first()
+def check_attention(name, pid):
+    at = Attention.query.filter_by(name_hash=hash_name(name), pid=pid, disabled=False).first()
     return 1 if at else 0
+
+def check_can_del(name, author_hash):
+    return 1 if hash_name(name) == author_hash or name in get_config('ADMINS') else 0

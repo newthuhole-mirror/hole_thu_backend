@@ -54,6 +54,11 @@ class Attention(db.Model):
     pid = db.Column(db.Integer)
     disabled = db.Column(db.Boolean, default=False)
 
+class TagRecord(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    tag = db.Column(db.String(32))
+    pid = db.Column(db.Integer)
+
 class Syslog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     log_type = db.Column(db.String(16))

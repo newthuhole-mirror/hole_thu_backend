@@ -49,6 +49,14 @@ def map_comment(p, name):
         } for c in p.comments if not c.deleted
     ]
 
+def map_syslog(s):
+    return {
+            'type': s.log_type,
+            'detail': s.log_detail,
+            'user': look(s.name_hash),
+            'timestamp': s.timestamp
+        }
+
 def check_attention(name, pid):
     at = Attention.query.filter_by(name_hash=hash_name(name), pid=pid, disabled=False).first()
     return 1 if at else 0
@@ -58,3 +66,7 @@ def check_can_del(name, author_hash):
 
 def look(s):
     return s[:3] + '...' + s[-3:]
+
+def get_num(p):
+    if not (p and p.isdigit()): abort(422)
+    return int(p)

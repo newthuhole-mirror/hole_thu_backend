@@ -6,8 +6,8 @@ from flask_limiter.util import get_remote_address
 from mastodon import Mastodon
 import re, random, string, datetime, hashlib
 
-from models import db, User, Post, Comment, Attention, Syslog
-from utils import require_token, map_post, map_comment, check_attention, hash_name, look
+from models import db, User, Post, Comment, Attention, TagRecord, Syslog
+from utils import require_token, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -70,9 +70,7 @@ def auth():
 def get_list():
     u = require_token()
 
-    p = request.args.get('p')
-    p = int(p) if p and p.isdigit() else -1
-
+    p = get_num(request.args.get('p'))
 
     posts = Post.query.filter_by(deleted=False)
     if 'no_cw' in request.args:
@@ -90,8 +88,7 @@ def get_list():
 def get_one():
     u = require_token()
     
-    pid = request.args.get('pid')
-    pid = int(pid) if pid and pid.isdigit() else -1
+    pid = get_num(request.args.get('pid'))
 
     post = Post.query.get(pid)
     if not post: abort(404)
@@ -103,6 +100,27 @@ def get_one():
             'code': 0,
             'data': data
             }
+
+@app.route('/_api/v1/search')
+def search():
+    u = require_token()
+
+    page     = get_num(request.args.get('page'))
+    pagesize = get_num(request.args.get('pagesize'))
+    keywords = request.args.get('keywords')
+
+    pids = [tr.pid for tr in TagRecord.query.filter_by(tag=keywords).order_by(db.desc('pid')).paginate(page, pagesize).items]
+
+    data = [ map_post(Post.query.get(pid), u.name)
+                for pid in pids if Post.query.get(pid) and not Post.query.get(pid).deleted
+        ]
+
+    return {
+            'code': 0,
+            'count': len(data),
+            'data': data
+            }
+
 
 
 @app.route('/_api/v1/dopost', methods=['POST'])
@@ -126,7 +144,7 @@ def do_post():
             likenum = 1,
             comments = []
             )
-    
+
     if post_type == 'text':
         pass
     elif post_type == 'image':
@@ -134,10 +152,17 @@ def do_post():
         p.file_url = 'foo bar'
     else:
         abort(422)
-    
+
     db.session.add(p)
     db.session.commit()
-    
+
+    tags = re.findall('(^|\s)#([^#\s]{1,32})', content)
+    #print(tags)
+    for t in tags:
+        tag = t[1]
+        if not re.match('\d+', tag):
+            db.session.add(TagRecord(tag=tag, pid=p.id))
+
     db.session.add(Attention(name_hash=hash_name(u.name), pid=p.id))
     db.session.commit()
 
@@ -150,11 +175,7 @@ def do_post():
 def get_comment():
     u = require_token()
 
-    pid = request.args.get('pid')
-    if pid and pid.isdigit():
-        p = int(pid)
-    else:
-        abort(422)
+    pid = get_num(request.args.get('pid'))
 
     post = Post.query.get(pid)
     if not post: abort(404)
@@ -172,11 +193,7 @@ def get_comment():
 def do_comment():
     u = require_token()
 
-    pid = request.form.get('pid')
-    if pid and pid.isdigit():
-        p = int(pid)
-    else:
-        abort(422)
+    pid = get_num(request.form.get('pid'))
 
     post = Post.query.get(pid)
     if not post: abort(404)
@@ -205,11 +222,7 @@ def attention():
     s = request.form.get('switch')
     if s not in ['0', '1']: abort(422)
 
-    pid = request.form.get('pid')
-    if pid and pid.isdigit():
-        p = int(pid)
-    else:
-        abort(422)
+    pid = get_num(request.form.get('pid'))
     
     post = Post.query.get(pid)
     if not post: abort(404)
@@ -230,7 +243,7 @@ def attention():
 @app.route('/_api/v1/getattention')
 def get_attention():
     u = require_token()
-    
+
     ats = Attention.query.filter_by(name_hash=hash_name(u.name), disabled=False)
 
     posts = [Post.query.get(at.pid) for at in ats.all()]
@@ -250,13 +263,8 @@ def delete():
     u = require_token()
 
     obj_type = request.form.get('type')
-    obj_id = request.form.get('id')
+    obj_id = get_num(request.form.get('id'))
     note = request.form.get('note')
-
-    if obj_id and obj_id.isdigit():
-        obj_id = int(obj_id)
-    else:
-        abort(422)
 
     if note and len(note)>100: abort(422)
 
@@ -298,24 +306,14 @@ def system_log():
     return {
             'start_time': app.config['START_TIME'],
             'salt': look(app.config['SALT']),
-            'data' : [{
-                    'type': s.log_type,
-                    'detail': s.log_detail,
-                    'user': look(s.name_hash),
-                    'timestamp': s.timestamp
-                    } for s in ss
-                    ]
+            'data' : list(map(map_syslog, ss))
         }
 
 @app.route('/_api/v1/report', methods=['POST'])
 def report():
     u = require_token()
 
-    pid = request.form.get('pid')
-    if pid and pid.isdigit():
-        p = int(pid)
-    else:
-        abort(422)
+    pid = get_num(request.form.get('pid'))
 
     reason = request.form.get('reason', '')
 
@@ -331,3 +329,4 @@ def report():
 
 if __name__ == '__main__':
     app.run(debug=True)
+

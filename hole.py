@@ -26,9 +26,17 @@ CS_LOGIN_URL = Mastodon(api_base_url=app.config['MASTODON_URL']) \
                     redirect_uris = app.config['REDIRECT_URI'],
                     scopes = ['read:accounts']
                 )
+
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["1000 / hour"],
+)
+
 PER_PAGE = 50
 
 @app.route('/_login')
+@limiter.limit("5 / minute")
 def login():
     provider = request.args.get('p')
     if(provider == 'cs'):
@@ -37,6 +45,7 @@ def login():
     abort(404)
 
 @app.route('/_auth')
+@limiter.limit("5 / minute")
 def auth():
     # Currently, only for closed.social
     code = request.args.get('code')
@@ -106,7 +115,7 @@ def search():
     u = require_token()
 
     page     = get_num(request.args.get('page'))
-    pagesize = get_num(request.args.get('pagesize'))
+    pagesize = max(get_num(request.args.get('pagesize')), 200)
     keywords = request.args.get('keywords')
 
     pids = [tr.pid for tr in TagRecord.query.filter_by(tag=keywords).order_by(db.desc('pid')).paginate(page, pagesize).items]
@@ -124,6 +133,7 @@ def search():
 
 
 @app.route('/_api/v1/dopost', methods=['POST'])
+@limiter.limit("50 / hour; 1 / 3 second")
 def do_post():
     u = require_token()
 
@@ -190,6 +200,7 @@ def get_comment():
             }
 
 @app.route('/_api/v1/docomment', methods=['POST'])
+@limiter.limit("50 / hour; 1 / 3 second")
 def do_comment():
     u = require_token()
 
@@ -216,6 +227,7 @@ def do_comment():
             }
 
 @app.route('/_api/v1/attention', methods=['POST'])
+@limiter.limit("200 / hour; 1 / second")
 def attention():
     u = require_token()
     
@@ -259,6 +271,7 @@ def get_attention():
         }
 
 @app.route('/_api/v1/delete', methods=['POST'])
+@limiter.limit("50 / hour; 1 / 3 second")
 def delete():
     u = require_token()
 
@@ -310,6 +323,7 @@ def system_log():
         }
 
 @app.route('/_api/v1/report', methods=['POST'])
+@limiter.limit("50 / hour; 1 / 3 second")
 def report():
     u = require_token()
 

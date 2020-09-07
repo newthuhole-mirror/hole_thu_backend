@@ -289,7 +289,10 @@ def delete():
     if not obj: abort(404)
 
     if obj.name_hash == hash_name(u.name):
-        if obj_type == 'pid' and len(obj.comments): abort(403)
+        if obj_type == 'pid':
+            if len(obj.comments): abort(403)
+            Attention.query.filter_by(pid=obj.id).delete()
+            TagRecord.query.filter_by(pid=obj.id).delete()
         db.session.delete(obj)
     elif u.name in app.config.get('ADMINS'):
         obj.deleted = True

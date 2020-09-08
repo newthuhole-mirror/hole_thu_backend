@@ -196,7 +196,7 @@ def get_comment():
     
     return {
             'code': 0,
-            'attention': check_attention(hash_name(u.name), pid),
+            'attention': check_attention(u.name, pid),
             'data': data
             }
 
@@ -247,6 +247,8 @@ def attention():
     if not at:
         at = Attention(name_hash=hash_name(u.name), pid=pid, disabled=True)
         db.session.add(at)
+
+    print(at.disabled, s=='0')
 
     if(at.disabled != (s == '0')):
         at.disabled = (s == '0')

@@ -9,7 +9,7 @@ def tmp_token():
     return hash_name(str(int(time.time() / 900)) + User.query.get(1).token)[5:21]
 
 def require_token():
-    token = request.args.get('user_token')
+    token = request.headers.get('User-Token') or request.args.get('user_token')
     if not token: abort(401)
 
     if len(token.split('_')) == 2 and get_config('ENABLE_TMP'):

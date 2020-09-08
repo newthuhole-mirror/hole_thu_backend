@@ -197,6 +197,7 @@ def get_comment():
     return {
             'code': 0,
             'attention': check_attention(u.name, pid),
+            'likenum': post.likenum,
             'data': data
             }
 
@@ -255,7 +256,11 @@ def attention():
         post.likenum += 1 - 2 * int(s == '0');
         db.session.commit()
 
-    return {'code': 0}
+    return {
+            'code': 0,
+            'likenum': post.likenum,
+            'attention': (s=='1')
+            }
 
 @app.route('/_api/v1/getattention')
 def get_attention():

@@ -182,6 +182,30 @@ def do_post():
             'date': p.id
             }
 
+@app.route('/_api/v1/editcw', methods=['POST'])
+@limiter.limit("50 / hour; 1 / 2 second")
+def edit_cw():
+    u = require_token()
+
+    cw = request.form.get('cw')
+    pid = get_num(request.form.get('pid'))
+
+    cw =  cw.strip() if cw else None
+    if cw and len(cw)>32: abort(422)
+
+    post = Post.query.get(pid)
+    if not post: abort(404)
+    if post.deleted: abort(451)
+
+    if not (u.name in app.config.get('ADMINS') or hash_name(u.name) == post.name_hash):
+        abort(403)
+
+    post.cw = cw;
+    db.session.commit()
+
+    return {'code': 0}
+
+
 @app.route('/_api/v1/getcomment')
 def get_comment():
     u = require_token()
@@ -248,8 +272,6 @@ def attention():
     if not at:
         at = Attention(name_hash=hash_name(u.name), pid=pid, disabled=True)
         db.session.add(at)
-
-    print(at.disabled, s=='0')
 
     if(at.disabled != (s == '0')):
         at.disabled = (s == '0')

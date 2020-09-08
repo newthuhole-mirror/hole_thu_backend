@@ -1,15 +1,25 @@
-import hashlib
+import hashlib, time
 from flask import request, abort, current_app
 from models import User, Attention, Syslog
 
 def get_config(key):
     return current_app.config.get(key)
 
+def tmp_token():
+    return hash_name(str(int(time.time() / 900)) + User.query.get(1).token)[5:21]
+
 def require_token():
     token = request.args.get('user_token')
     if not token: abort(401)
+
+    if len(token.split('_')) == 2 and get_config('ENABLE_TMP'):
+        tt, suf = token.split('_')
+        if tt != tmp_token(): abort(401)
+        return User(name='tmp_'+suf)
+
+
     u = User.query.filter_by(token=token).first()
-    if not u or Syslog.query.filter_by(log_type='BANNED', name_hash=hash_name(u.name)).first(): abort(403)
+    if not u or Syslog.query.filter_by(log_type='BANNED', name_hash=hash_name(u.name)).first(): abort(401)
     return u
 
 def hash_name(name):

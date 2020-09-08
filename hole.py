@@ -7,7 +7,7 @@ from mastodon import Mastodon
 import re, random, string, datetime, hashlib
 
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import require_token, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num
+from utils import require_token, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -139,6 +139,7 @@ def do_post():
 
     content = request.form.get('text')
     content =  content.strip() if content else None
+    content = '[tmp]\n' + content if u.name[:4] == 'tmp_' else content
     post_type = request.form.get('type')
     cw = request.form.get('cw')
     cw =  cw.strip() if cw else None
@@ -212,6 +213,7 @@ def do_comment():
 
     content = request.form.get('text')
     content =  content.strip() if content else None
+    content = '[tmp]\n' + content if u.name[:4] == 'tmp_' else content
     if not content or len(content) > 4096: abort(422)
 
     c = Comment(
@@ -230,7 +232,8 @@ def do_comment():
 @limiter.limit("200 / hour; 1 / second")
 def attention():
     u = require_token()
-    
+    if u.name[:4] == 'tmp_': abort(403)
+
     s = request.form.get('switch')
     if s not in ['0', '1']: abort(422)
 
@@ -322,6 +325,7 @@ def system_log():
     return {
             'start_time': app.config['START_TIME'],
             'salt': look(app.config['SALT']),
+            'tmp_token': tmp_token(),
             'data' : list(map(map_syslog, ss))
         }
 

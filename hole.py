@@ -4,7 +4,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from mastodon import Mastodon
-import re, random, string, datetime, hashlib
+import re, random, string, datetime, hashlib,requests
 
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
 from utils import require_token, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token
@@ -26,6 +26,9 @@ CS_LOGIN_URL = Mastodon(api_base_url=app.config['MASTODON_URL']) \
                     redirect_uris = app.config['REDIRECT_URI'],
                     scopes = ['read:accounts']
                 )
+THUHOLE_SEND_URL = f"{app.config.get('THUHOLE_ADDRESS')}/services/thuhole/api.php?action=docomment&PKUHelperAPI=3.0&jsapiver=v0.3.1.133-444340&user_token="
+
+THUHOLE_GET_URL = f"{app.config.get('THUHOLE_ADDRESS')}/services/thuhole/api.php?action=getcomment&pid={app.config.get('THUHOLE_PID')}&PKUHelperAPI=3.0&jsapiver=v0.3.1.133-444340&user_token="
 
 limiter = Limiter(
     app,
@@ -36,11 +39,58 @@ limiter = Limiter(
 PER_PAGE = 50
 
 @app.route('/_login')
-@limiter.limit("5 / minute")
+@limiter.limit("5 / minute, 50 / hour")
 def login():
     provider = request.args.get('p')
-    if(provider == 'cs'):
+    if provider == 'cs':
         return redirect(CS_LOGIN_URL)
+    elif provider == 'thuhole':
+        token = request.args.get('token')
+        try:
+            rt = 'hole_thu login: ' + ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+            headers = {
+                        'user-agent': 'holeBot; hole.thu.monster',
+                        'host': app.config.get('THUHOLE_HOST')
+                    }
+            r = requests.post(
+                        THUHOLE_SEND_URL+token,
+                        headers=headers,
+                        data={
+                            'pid': app.config.get('THUHOLE_PID'),
+                            'text': rt,
+                            'user_token': token
+                            }
+                    )
+            r = requests.get(
+                        THUHOLE_GET_URL+token,
+                        headers=headers
+                        )
+            c = r.json()
+            data = c.get('data')
+
+            mat = [c['name'] for c in data if c['text'].endswith(rt)]
+
+            if mat:
+                name = mat[0]
+            else:
+                abort(401)
+
+            name = 'th_' + ''.join(map(lambda s: s[0], name.split()))  
+    
+            u = v = User.query.filter_by(name=name).first()
+
+            if not u:
+                u = User(name=name)
+                db.session.add(u)
+
+            if not v or False: #TODO: reset token
+                u.token = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+                db.session.commit()
+
+            return redirect('/?token='+ u.token)
+        except :
+            abort(401)
+
 
     abort(404)
 

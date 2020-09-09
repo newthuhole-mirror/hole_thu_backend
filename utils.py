@@ -56,7 +56,7 @@ def map_comment(p, name):
         'text': c.content,
         'timestamp': c.timestamp,
         'can_del': check_can_del(name, c.name_hash)
-        } for c in p.comments if not c.deleted
+        } for c in p.comments if not (c.deleted and gen_name_id(c.name_hash)>=0)
     ]
 
 def map_syslog(s):

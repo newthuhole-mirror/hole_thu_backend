@@ -47,7 +47,7 @@ def login():
     elif provider == 'thuhole':
         token = request.args.get('token')
         try:
-            rt = 'hole_thu login: ' + ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+            rt = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
             headers = {
                         'user-agent': 'holeBot; hole.thu.monster',
                         'host': app.config.get('THUHOLE_HOST')
@@ -376,7 +376,9 @@ def delete():
             if len(obj.comments): abort(403)
             Attention.query.filter_by(pid=obj.id).delete()
             TagRecord.query.filter_by(pid=obj.id).delete()
-        db.session.delete(obj)
+            db.session.delete(obj)
+        else:
+            obj.deleted = True
     elif u.name in app.config.get('ADMINS'):
         obj.deleted = True
         db.session.add(Syslog(

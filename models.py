@@ -21,12 +21,13 @@ class Post(db.Model):
     likenum = db.Column(db.Integer, default=0)
     timestamp = db.Column(db.Integer)
     deleted = db.Column(db.Boolean, default=False)
+    comment_timestamp = db.Column(db.Integer, default=0)
 
     comments = db.relationship('Comment', backref='post', lazy=True)
 
     def __init__(self, **kwargs):
         super(Post, self).__init__(**kwargs)
-        self.timestamp = int(time.time())
+        self.timestamp = self.comment_timestamp = int(time.time())
 
     def __repr__(self):
         return f"{self.name_hash}:[{self.content}]"

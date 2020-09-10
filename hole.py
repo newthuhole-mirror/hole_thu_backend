@@ -2,6 +2,7 @@ from flask import Flask, request, render_template, send_from_directory, abort, r
 from flask_sqlalchemy import SQLAlchemy
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_migrate import Migrate
 
 from mastodon import Mastodon
 import re, random, string, datetime, hashlib,requests
@@ -16,9 +17,10 @@ app.config['JSON_AS_ASCII'] = False
 app.config.from_pyfile('config.py')
 
 db.init_app(app)
+migrate = Migrate(app, db)
 
-with app.app_context():
-    db.create_all()
+#with app.app_context():
+#    db.create_all()
 
 CS_LOGIN_URL = Mastodon(api_base_url=app.config['MASTODON_URL']) \
                 .auth_request_url(
@@ -134,7 +136,8 @@ def get_list():
     posts = Post.query.filter_by(deleted=False)
     if 'no_cw' in request.args:
         posts = posts.filter_by(cw=None)
-    posts = posts.order_by(db.desc('timestamp')).paginate(p, PER_PAGE)
+    posts = posts.order_by(db.desc('comment_timestamp')) if 'by_c' in request.args else posts.order_by(db.desc('id'))
+    posts = posts.paginate(p, PER_PAGE)
 
     data =list(map(map_post, posts.items, [u.name] * len(posts.items)))
 
@@ -297,6 +300,7 @@ def do_comment():
             content = content,
             )
     post.comments.append(c)
+    post.comment_timestamp = c.timestamp
     db.session.commit()
 
     return {

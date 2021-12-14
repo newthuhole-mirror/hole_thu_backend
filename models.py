@@ -3,6 +3,7 @@ import time
 
 db = SQLAlchemy()
 
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(16))
@@ -11,10 +12,12 @@ class User(db.Model):
     def __repr__(self):
         return f"{self.name}({self.token})"
 
+
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name_hash = db.Column(db.String(64))
     content = db.Column(db.String(4096))
+    search_text = db.Column(db.String(4096), default='', index=True)
     post_type = db.Column(db.String(8))
     cw = db.Column(db.String(32))
     file_url = db.Column(db.String(256))
@@ -32,6 +35,7 @@ class Post(db.Model):
     def __repr__(self):
         return f"{self.name_hash}:[{self.content}]"
 
+
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name_hash = db.Column(db.String(64))
@@ -40,14 +44,15 @@ class Comment(db.Model):
     deleted = db.Column(db.Boolean, default=False)
 
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'),
-        nullable=False)
+                        nullable=False)
 
     def __init__(self, **kwargs):
         super(Comment, self).__init__(**kwargs)
         self.timestamp = int(time.time())
-    
+
     def __repr__(self):
         return f"{self.name_hash}:[{self.content}->{self.post_id}]"
+
 
 class Attention(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -55,10 +60,12 @@ class Attention(db.Model):
     pid = db.Column(db.Integer)
     disabled = db.Column(db.Boolean, default=False)
 
+
 class TagRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     tag = db.Column(db.String(32))
     pid = db.Column(db.Integer)
+
 
 class Syslog(db.Model):
     id = db.Column(db.Integer, primary_key=True)

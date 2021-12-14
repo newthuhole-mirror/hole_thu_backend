@@ -151,7 +151,7 @@ def search():
         Post.search_text.like("%{}%".format(keywords))
     ).filter(
         Post.id.notin_(tag_pids)
-    ).order_by(
+    ).filter_by(deleted=False).order_by(
         Post.id.desc()
     ).limit(pagesize).offset((page - 1) * pagesize).all()
 
@@ -381,7 +381,7 @@ def delete():
 
     obj_type = request.form.get('type')
     obj_id = get_num(request.form.get('id'))
-    note = request.form.get('note')
+    note = request.form.get('note', '')
 
     if note and len(note) > 100:
         abort(422)
@@ -401,6 +401,11 @@ def delete():
             Attention.query.filter_by(pid=obj.id).delete()
             TagRecord.query.filter_by(pid=obj.id).delete()
             db.session.delete(obj)
+            db.session.add(Syslog(
+                log_type='SELF DELETE POST',
+                log_detail=f"pid={obj_id}\n{note}",
+                name_hash=hash_name(u.name)
+            ))
         else:
             obj.deleted = True
     elif u.name in app.config.get('ADMINS'):

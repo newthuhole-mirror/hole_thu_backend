@@ -310,6 +310,20 @@ def do_comment():
     )
     post.comments.append(c)
     post.comment_timestamp = c.timestamp
+
+    at = Attention.query.filter_by(
+        name_hash=hash_name(u.name), pid=pid
+    ).first()
+
+    if not at:
+        at = Attention(name_hash=hash_name(u.name), pid=pid, disabled=False)
+        db.session.add(at)
+        post.likenum += 1
+    else:
+        if at.disabled:
+            post.likenum += 1
+            at.disabled = False
+
     db.session.commit()
 
     return {
@@ -336,8 +350,8 @@ def attention():
         abort(404)
 
     at = Attention.query.filter_by(
-        name_hash=hash_name(
-            u.name), pid=pid).first()
+        name_hash=hash_name(u.name), pid=pid
+    ).first()
 
     if not at:
         at = Attention(name_hash=hash_name(u.name), pid=pid, disabled=True)

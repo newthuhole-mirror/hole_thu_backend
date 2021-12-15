@@ -357,15 +357,23 @@ def attention():
 def get_attention():
     u = require_token()
 
-    ats = Attention.query.filter_by(
-        name_hash=hash_name(
-            u.name), disabled=False)
+    ats = Attention.query.with_entities(
+        Attention.pid
+    ).filter_by(
+        name_hash=hash_name(u.name), disabled=False
+    ).all()
 
-    posts = [Post.query.get(at.pid) for at in ats.all()]
-    data = [map_post(post, u.name, 10)
-            for post in posts[::-1]
-            if post and not post.deleted
-            ]
+    pids = [pid for pid, in ats] or [0]  # sql not allow empty in
+    posts = Post.query.filter(
+        Post.id.in_(pids)
+    ).filter_by(
+        deleted=False
+    ).order_by(Post.id.desc()).all()
+
+    data = [
+        map_post(post, u.name, 10)
+        for post in posts
+    ]
 
     return {
         'code': 0,

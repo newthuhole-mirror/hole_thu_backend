@@ -116,7 +116,7 @@ def get_one():
     post = Post.query.get(pid)
     if not post:
         abort(404)
-    if post.deleted:
+    if post.deleted or post.is_reported:
         abort(451)
 
     data = map_post(post, u.name)
@@ -143,22 +143,24 @@ def search():
         tag=keywords
     ).all()
 
-    print(tag_pids)
-
     tag_pids = [tag_pid for tag_pid, in tag_pids] or [0]  # sql not allowed empty in
 
     posts = Post.query.filter(
         Post.search_text.like("%{}%".format(keywords))
     ).filter(
         Post.id.notin_(tag_pids)
-    ).filter_by(deleted=False).order_by(
+    ).filter_by(
+        deleted=False, is_reported=False
+    ).order_by(
         Post.id.desc()
     ).limit(pagesize).offset((page - 1) * pagesize).all()
 
     if page == 1:
         posts = Post.query.filter(
             Post.id.in_(tag_pids)
-        ).filter_by(deleted=False).order_by(
+        ).filter_by(
+            deleted=False, is_reported=False
+        ).order_by(
             Post.id.desc()
         ).all() + posts
 
@@ -451,7 +453,7 @@ def system_log():
 
 
 @app.route('/_api/v1/report', methods=['POST'])
-@limiter.limit("50 / hour; 1 / 3 second")
+@limiter.limit("10 / hour; 1 / 3 second")
 def report():
     u = require_token()
 
@@ -464,6 +466,11 @@ def report():
         log_detail=f"pid={pid}\n{reason}",
         name_hash=hash_name(u.name)
     ))
+
+    post = Post.query.get(pid)
+    if post:
+        post.is_reported = True
+
     db.session.commit()
 
     return {'code': 0}

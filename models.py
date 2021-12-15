@@ -24,6 +24,7 @@ class Post(db.Model):
     likenum = db.Column(db.Integer, default=0)
     timestamp = db.Column(db.Integer)
     deleted = db.Column(db.Boolean, default=False)
+    is_reported = db.Column(db.Boolean, default=False)
     comment_timestamp = db.Column(db.Integer, default=0)
 
     comments = db.relationship('Comment', backref='post', lazy=True)

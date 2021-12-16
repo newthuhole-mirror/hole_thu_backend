@@ -454,7 +454,7 @@ def delete():
 
 @app.route('/_api/v1/systemlog')
 def system_log():
-    require_token()
+    u = require_token()
 
     ss = Syslog.query.order_by(db.desc('timestamp')).limit(100).all()
 
@@ -462,7 +462,7 @@ def system_log():
         'start_time': app.config['START_TIME'],
         'salt': look(app.config['SALT']),
         'tmp_token': tmp_token(),
-        'data': list(map(map_syslog, ss))
+        'data': [map_syslog(s,u) for s in ss]
     }
 
 

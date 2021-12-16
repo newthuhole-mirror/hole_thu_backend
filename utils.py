@@ -73,10 +73,10 @@ def map_comment(p, name):
     ]
 
 
-def map_syslog(s):
+def map_syslog(s, u=None):
     return {
         'type': s.log_type,
-        'detail': s.log_detail,
+        'detail': s.log_detail if check_can_del(u.name, s.name_hash) else '',
         'user': look(s.name_hash),
         'timestamp': s.timestamp
     }

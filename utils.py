@@ -8,12 +8,17 @@ def get_config(key):
     return current_app.config.get(key)
 
 
+def is_admin(name):
+    return name in get_config('ADMINS')
+
+
 def tmp_token():
-    return hash_name(str(int(time.time() / 900)) +
-                     User.query.get(1).token)[5:21]
+    return hash_name(
+        str(int(time.time() / 900)) + User.query.get(1).token
+    )[5:21]
 
 
-def require_token():
+def get_current_user():
     token = request.headers.get('User-Token') or request.args.get('user_token')
     if not token:
         abort(401)
@@ -37,7 +42,7 @@ def hash_name(name):
 
 
 def map_post(p, name, mc=50):
-    return {
+    r = {
         'pid': p.id,
         'likenum': p.likenum,
         'cw': p.cw,
@@ -51,6 +56,9 @@ def map_post(p, name, mc=50):
         'can_del': check_can_del(name, p.name_hash),
         'allow_search': bool(p.search_text)
     }
+    if is_admin(name):
+        r['hot_score'] = p.hot_score
+    return r
 
 
 def map_comment(p, name):
@@ -91,8 +99,7 @@ def check_attention(name, pid):
 
 
 def check_can_del(name, author_hash):
-    return 1 if hash_name(
-        name) == author_hash or name in get_config('ADMINS') else 0
+    return int(hash_name(name) == author_hash or is_admin(name))
 
 
 def look(s):

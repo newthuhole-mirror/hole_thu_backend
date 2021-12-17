@@ -6,10 +6,11 @@ from flask import Flask, request, abort, redirect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
+from sqlalchemy.sql.expression import func
 
 from mastodon import Mastodon
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import require_token, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token
+from utils import get_current_user, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -44,7 +45,7 @@ def login():
     if provider == 'cs':
         return redirect(CS_LOGIN_URL)
 
-    abort(404)
+    abort(401)
 
 
 @app.route('/_auth')
@@ -85,17 +86,30 @@ def auth():
 
 @app.route('/_api/v1/getlist')
 def get_list():
-    u = require_token()
+    u = get_current_user()
 
-    p = get_num(request.args.get('p'))
+    p = request.args.get('p', type=int, default=1)
+    order_mode = request.args.get('order_mode', type=int, default=0)
+    if request.args.get('by_c'):
+        order_mode = 1  # 兼容旧版前端
+    if order_mode == 3:
+        p = 1
 
-    posts = Post.query.filter_by(deleted=False)
+    query = Post.query.filter_by(deleted=False)
     if 'no_cw' in request.args:
-        posts = posts.filter_by(cw=None)
-    posts = posts.order_by(
-        db.desc('comment_timestamp')) if 'by_c' in request.args else posts.order_by(
-        db.desc('id'))
-    posts = posts.paginate(p, PER_PAGE)
+        query = query.filter_by(cw=None)
+    if order_mode == 2:
+        query = query.filter(
+            Post.hot_score != -1
+        ).filter_by(is_reported=False)
+
+    order = {
+        1: Post.comment_timestamp.desc(),  # 最近评论
+        2: Post.hot_score.desc(),  # 热门
+        3: func.random()  # 随机
+    }.get(order_mode, Post.id.desc())  # 最新
+
+    posts = query.order_by(order).paginate(p, PER_PAGE)
 
     data = list(map(map_post, posts.items, [u.name] * len(posts.items)))
 
@@ -109,13 +123,11 @@ def get_list():
 
 @app.route('/_api/v1/getone')
 def get_one():
-    u = require_token()
+    u = get_current_user()
 
     pid = request.args.get('pid', type=int)
 
-    post = Post.query.get(pid)
-    if not post:
-        abort(404)
+    post = Post.query.get_or_404(pid)
     if post.deleted or post.is_reported:
         abort(451)
 
@@ -129,7 +141,7 @@ def get_one():
 
 @app.route('/_api/v1/search')
 def search():
-    u = require_token()
+    u = get_current_user()
 
     page = request.args.get('page', type=int, default=1)
     pagesize = min(request.args.get('pagesize', type=int, default=200), 200)
@@ -179,7 +191,7 @@ def search():
 @app.route('/_api/v1/dopost', methods=['POST'])
 @limiter.limit("50 / hour; 1 / 3 second")
 def do_post():
-    u = require_token()
+    u = get_current_user()
 
     allow_search = request.form.get('allow_search')
     print(allow_search)
@@ -238,7 +250,7 @@ def do_post():
 @app.route('/_api/v1/editcw', methods=['POST'])
 @limiter.limit("50 / hour; 1 / 2 second")
 def edit_cw():
-    u = require_token()
+    u = get_current_user()
 
     cw = request.form.get('cw')
     pid = get_num(request.form.get('pid'))
@@ -247,9 +259,7 @@ def edit_cw():
     if cw and len(cw) > 32:
         abort(422)
 
-    post = Post.query.get(pid)
-    if not post:
-        abort(404)
+    post = Post.query.get_or_404(pid)
     if post.deleted:
         abort(451)
 
@@ -265,7 +275,7 @@ def edit_cw():
 
 @app.route('/_api/v1/getcomment')
 def get_comment():
-    u = require_token()
+    u = get_current_user()
 
     pid = get_num(request.args.get('pid'))
 
@@ -288,7 +298,7 @@ def get_comment():
 @app.route('/_api/v1/docomment', methods=['POST'])
 @limiter.limit("50 / hour; 1 / 3 second")
 def do_comment():
-    u = require_token()
+    u = get_current_user()
 
     pid = get_num(request.form.get('pid'))
 
@@ -311,6 +321,9 @@ def do_comment():
     post.comments.append(c)
     post.comment_timestamp = c.timestamp
 
+    if post.hot_score != -1:
+        post.hot_score += 1
+
     at = Attention.query.filter_by(
         name_hash=hash_name(u.name), pid=pid
     ).first()
@@ -319,6 +332,8 @@ def do_comment():
         at = Attention(name_hash=hash_name(u.name), pid=pid, disabled=False)
         db.session.add(at)
         post.likenum += 1
+        if post.hot_score != -1:
+            post.hot_score += 2
     else:
         if at.disabled:
             post.likenum += 1
@@ -335,7 +350,7 @@ def do_comment():
 @app.route('/_api/v1/attention', methods=['POST'])
 @limiter.limit("200 / hour; 1 / second")
 def attention():
-    u = require_token()
+    u = get_current_user()
     if u.name[:4] == 'tmp_':
         abort(403)
 
@@ -356,11 +371,14 @@ def attention():
     if not at:
         at = Attention(name_hash=hash_name(u.name), pid=pid, disabled=True)
         db.session.add(at)
+        if post.hot_score != -1:
+            post.hot_score += 2
 
     if(at.disabled != (s == '0')):
         at.disabled = (s == '0')
         post.likenum += 1 - 2 * int(s == '0')
-        db.session.commit()
+
+    db.session.commit()
 
     return {
         'code': 0,
@@ -371,7 +389,7 @@ def attention():
 
 @app.route('/_api/v1/getattention')
 def get_attention():
-    u = require_token()
+    u = get_current_user()
 
     ats = Attention.query.with_entities(
         Attention.pid
@@ -401,7 +419,7 @@ def get_attention():
 @app.route('/_api/v1/delete', methods=['POST'])
 @limiter.limit("50 / hour; 1 / 3 second")
 def delete():
-    u = require_token()
+    u = get_current_user()
 
     obj_type = request.form.get('type')
     obj_id = get_num(request.form.get('id'))
@@ -425,11 +443,6 @@ def delete():
             Attention.query.filter_by(pid=obj.id).delete()
             TagRecord.query.filter_by(pid=obj.id).delete()
             db.session.delete(obj)
-            db.session.add(Syslog(
-                log_type='SELF DELETE POST',
-                log_detail=f"pid={obj_id}\n{note}",
-                name_hash=hash_name(u.name)
-            ))
         else:
             obj.deleted = True
     elif u.name in app.config.get('ADMINS'):
@@ -454,7 +467,7 @@ def delete():
 
 @app.route('/_api/v1/systemlog')
 def system_log():
-    u = require_token()
+    u = get_current_user()
 
     ss = Syslog.query.order_by(db.desc('timestamp')).limit(100).all()
 
@@ -462,14 +475,14 @@ def system_log():
         'start_time': app.config['START_TIME'],
         'salt': look(app.config['SALT']),
         'tmp_token': tmp_token(),
-        'data': [map_syslog(s,u) for s in ss]
+        'data': [map_syslog(s, u) for s in ss]
     }
 
 
 @app.route('/_api/v1/report', methods=['POST'])
 @limiter.limit("10 / hour; 1 / 3 second")
 def report():
-    u = require_token()
+    u = get_current_user()
 
     pid = get_num(request.form.get('pid'))
 
@@ -485,6 +498,23 @@ def report():
     if post:
         post.is_reported = True
 
+    db.session.commit()
+
+    return {'code': 0}
+
+
+@app.route('/_api/v1/update_score', methods=['POST'])
+def edit_hot_score():
+    u = get_current_user()
+    if not is_admin(u.name):
+        print(u.name)
+        abort(403)
+
+    pid = request.form.get('pid', type=int)
+    score = request.form.get('score', type=int)
+
+    post = Post.query.get_or_404(pid)
+    post.hot_score = score
     db.session.commit()
 
     return {'code': 0}

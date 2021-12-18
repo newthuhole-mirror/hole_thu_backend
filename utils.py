@@ -2,6 +2,7 @@ import hashlib
 import time
 from flask import request, abort, current_app
 from models import User, Attention, Syslog
+from config import ADMINS, ENABLE_TMP
 
 
 def get_config(key):
@@ -9,7 +10,7 @@ def get_config(key):
 
 
 def is_admin(name):
-    return name in get_config('ADMINS')
+    return name in ADMINS
 
 
 def tmp_token():
@@ -18,27 +19,29 @@ def tmp_token():
     )[5:21]
 
 
-def get_current_user():
+def get_current_username():
     token = request.headers.get('User-Token') or request.args.get('user_token')
     if not token:
         abort(401)
 
-    if len(token.split('_')) == 2 and get_config('ENABLE_TMP'):
+    if len(token.split('_')) == 2 and ENABLE_TMP:
         tt, suf = token.split('_')
         if tt != tmp_token():
             abort(401)
-        return User(name='tmp_' + suf)
+        return 'tmp_' + suf
 
     u = User.query.filter_by(token=token).first()
     if not u or Syslog.query.filter_by(
             log_type='BANNED', name_hash=hash_name(u.name)).first():
         abort(401)
-    return u
+    return u.name
 
 
 def hash_name(name):
+    print(name)
     return hashlib.sha256(
-        (get_config('SALT') + name).encode('utf-8')).hexdigest()
+        (get_config('SALT') + name).encode('utf-8')
+    ).hexdigest()
 
 
 def map_post(p, name, mc=50):
@@ -81,10 +84,10 @@ def map_comment(p, name):
     ]
 
 
-def map_syslog(s, u=None):
+def map_syslog(s, username):
     return {
         'type': s.log_type,
-        'detail': s.log_detail if check_can_del(u.name, s.name_hash) else '',
+        'detail': s.log_detail if check_can_del(username, s.name_hash) else '',
         'user': look(s.name_hash),
         'timestamp': s.timestamp
     }
@@ -99,7 +102,7 @@ def check_attention(name, pid):
 
 
 def check_can_del(name, author_hash):
-    return int(hash_name(name) == author_hash or is_admin(name))
+    return hash_name(name) == author_hash or is_admin(name)
 
 
 def look(s):

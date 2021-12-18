@@ -26,7 +26,8 @@ class Post(db.Model):
     deleted = db.Column(db.Boolean, default=False)
     is_reported = db.Column(db.Boolean, default=False)
     comment_timestamp = db.Column(db.Integer, default=0, index=True)
-    hot_score = db.Column(db.Integer, default=0, nullable=False, server_default="0")
+    hot_score = db.Column(db.Integer, default=0,
+                          nullable=False, server_default="0")
 
     comments = db.relationship('Comment', backref='post', lazy=True)
 

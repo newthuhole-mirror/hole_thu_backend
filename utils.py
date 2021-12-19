@@ -1,8 +1,14 @@
 import hashlib
 import time
+import redis
 from flask import request, abort, current_app
 from models import User, Attention, Syslog
-from config import ADMINS, ENABLE_TMP
+from config import RDS_CONFIG, ADMINS, ENABLE_TMP
+
+RDS_KEY_POLL_OPTS = 'hole_thu:poll_opts:%s'
+RDS_KEY_POLL_VOTES = 'hole_thu:poll_votes:%s:%s'
+
+rds = redis.Redis(**RDS_CONFIG)
 
 
 def get_config(key):
@@ -38,7 +44,6 @@ def get_current_username():
 
 
 def hash_name(name):
-    print(name)
     return hashlib.sha256(
         (get_config('SALT') + name).encode('utf-8')
     ).hexdigest()
@@ -57,11 +62,33 @@ def map_post(p, name, mc=50):
         'comments': map_comment(p, name) if len(p.comments) < mc else None,
         'attention': check_attention(name, p.id),
         'can_del': check_can_del(name, p.name_hash),
-        'allow_search': bool(p.search_text)
+        'allow_search': bool(p.search_text),
+        'poll': gen_poll_dict(p.id, name)
     }
     if is_admin(name):
         r['hot_score'] = p.hot_score
+
     return r
+
+
+def gen_poll_dict(pid, name):
+    if not rds.exists(RDS_KEY_POLL_OPTS % pid):
+        return None
+
+    vote = None
+    answers = []
+    for idx, opt in enumerate(rds.lrange(RDS_KEY_POLL_OPTS % pid, 0, -1)):
+        answers.append({
+            'option': opt,
+            'votes': rds.scard(RDS_KEY_POLL_VOTES % (pid, idx))
+        })
+        if rds.sismember(RDS_KEY_POLL_VOTES % (pid, idx), hash_name(name)):
+            vote = opt
+
+    return {
+        'answers': answers,
+        'vote': vote
+    }
 
 
 def map_comment(p, name):

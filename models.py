@@ -14,6 +14,8 @@ class User(db.Model):
 
 
 class Post(db.Model):
+    __table_args__ = {'sqlite_autoincrement': True}
+
     id = db.Column(db.Integer, primary_key=True)
     name_hash = db.Column(db.String(64))
     content = db.Column(db.String(4096))

@@ -10,7 +10,7 @@ from sqlalchemy.sql.expression import func
 
 from mastodon import Mastodon
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del
+from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -39,6 +39,21 @@ limiter = Limiter(
 )
 
 PER_PAGE = 50
+
+
+class APIError(Exception):
+    msg = '未知错误'
+
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return str(self.msg)
+
+
+@app.errorhandler(APIError)
+def handle_api_error(e):
+    return {'code': 1, 'msg': e.msg}
 
 
 @app.route('/_login')
@@ -200,11 +215,11 @@ def do_post():
     username = get_current_username()
 
     allow_search = request.form.get('allow_search')
-    print(allow_search)
     content = request.form.get('text', '').strip()
     content = ('[tmp]\n' if username[:4] == 'tmp_' else '') + content
     post_type = request.form.get('type')
     cw = request.form.get('cw', '').strip()
+    poll_options = request.form.getlist('poll_options')
 
     if not content or len(content) > 4096 or len(cw) > 32:
         abort(422)
@@ -222,19 +237,9 @@ def do_post():
         comments=[]
     )
 
-    if post_type == 'text':
-        pass
-    elif post_type == 'image':
-        # TODO
-        p.file_url = 'foo bar'
-    else:
-        abort(422)
-
     db.session.add(p)
-    db.session.commit()
 
     tags = re.findall('(^|\\s)#([^#\\s]{1,32})', content)
-    # print(tags)
     for t in tags:
         tag = t[1]
         if not re.match('\\d+', tag):
@@ -242,6 +247,16 @@ def do_post():
 
     db.session.add(Attention(name_hash=hash_name(username), pid=p.id))
     db.session.commit()
+
+    if poll_options and poll_options[0]:
+        if len(poll_options) != len(set(poll_options)):
+            raise APIError('有重复的投票选项')
+        if len(poll_options) > 8:
+            raise APIError('选项过多')
+        if max(map(len, poll_options)) > 32:
+            raise APIError('选项过长')
+        rds.delete(RDS_KEY_POLL_OPTS % p.id)  # 由于历史原因，现在的数据库里发布后删再发布可能导致id重复
+        rds.rpush(RDS_KEY_POLL_OPTS % p.id, *poll_options)
 
     return {
         'code': 0,
@@ -480,9 +495,7 @@ def system_log():
 @limiter.limit("10 / hour; 1 / 3 second")
 def report():
     username = get_current_username()
-
     pid = get_num(request.form.get('pid'))
-
     reason = request.form.get('reason', '')
 
     db.session.add(Syslog(
@@ -514,6 +527,31 @@ def edit_hot_score():
     db.session.commit()
 
     return {'code': 0}
+
+
+@app.route('/_api/v1/vote', methods=['POST'])
+@limiter.limit("100 / hour; 1 / 2 second")
+def add_vote():
+    username = get_current_username()
+    pid = request.form.get('pid', type=int)
+    vote = request.form.get('vote')
+
+    if not rds.exists(RDS_KEY_POLL_OPTS % pid):
+        abort(404)
+
+    opts = rds.lrange(RDS_KEY_POLL_OPTS % pid, 0, -1)
+    for idx, opt in enumerate(opts):
+        if rds.sismember(RDS_KEY_POLL_VOTES % (pid, idx), hash_name(username)):
+            raise APIError('已经投过票了')
+    if vote not in opts:
+        raise APIError('无效的选项')
+
+    rds.sadd(RDS_KEY_POLL_VOTES % (pid, opts.index(vote)), hash_name(username))
+
+    return {
+        'code': 0,
+        'data': gen_poll_dict(pid, username)
+    }
 
 
 if __name__ == '__main__':

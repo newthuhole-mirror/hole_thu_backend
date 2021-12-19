@@ -10,3 +10,8 @@ REDIRECT_URI = 'http://hole.thu.monster/_auth'
 ADMINS = ['cs_114514']
 START_TIME = int(time.time())
 ENABLE_TMP = True
+RDS_CONFIG = {
+    'host': 'localhost',
+    'port': 6379,
+    'decode_responses': True
+}

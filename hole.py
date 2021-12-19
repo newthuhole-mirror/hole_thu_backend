@@ -10,7 +10,7 @@ from sqlalchemy.sql.expression import func
 
 from mastodon import Mastodon
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit
+from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit, RDS_KEY_BLOCK_SET, RDS_KEY_BLOCKED_COUNT, RDS_KEY_DANGEROUS_USERS
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -39,6 +39,10 @@ limiter = Limiter(
 )
 
 PER_PAGE = 50
+DANGEROUS_USER_THRESHOLD = 10
+
+# 重置后旧的被拉黑次数可以丢弃了，但其他仍需要保留
+rds.delete(RDS_KEY_BLOCKED_COUNT)
 
 
 class APIError(Exception):
@@ -555,6 +559,46 @@ def add_vote():
     return {
         'code': 0,
         'data': gen_poll_dict(pid, username)
+    }
+
+
+@app.route('/_api/v1/block', methods=['POST'])
+@limiter.limit("15 / hour; 1 / 2 second")
+def block_user_by_target():
+    username = get_current_username()
+    target_type = request.form.get('type')
+    target_id = request.form.get('id', type=int)
+
+    if username.startswith('tmp_'):
+        raise APIError('临时用户无法拉黑')
+
+    if target_type == 'post':
+        target = Post.query.get_or_404(target_id)
+    elif target_type == 'comment':
+        target = Comment.query.get_or_404(target_id)
+    else:
+        raise APIError('无效的type')
+
+    if hash_name(username) == target.name_hash:
+        raise APIError('不可拉黑自己')
+
+    if is_admin(username):
+        rds.sadd(RDS_KEY_DANGEROUS_USERS, target.name_hash)
+        curr_cnt = rds.hget(RDS_KEY_BLOCKED_COUNT, target.name_hash)
+    else:
+        if rds.sismember(RDS_KEY_BLOCK_SET % username, target.name_hash):
+            raise APIError('已经拉黑了')
+        rds.sadd(RDS_KEY_BLOCK_SET % username, target.name_hash)
+        curr_cnt = rds.hincrby(RDS_KEY_BLOCKED_COUNT, target.name_hash, 1)
+        if curr_cnt >= DANGEROUS_USER_THRESHOLD:
+            rds.sadd(RDS_KEY_DANGEROUS_USERS, target.name_hash)
+
+    return {
+        'code': 0,
+        'data': {
+            'curr': curr_cnt,
+            'threshold': DANGEROUS_USER_THRESHOLD
+        }
     }
 
 

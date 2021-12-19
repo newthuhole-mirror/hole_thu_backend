@@ -10,6 +10,10 @@ from config import RDS_CONFIG, ADMINS, ENABLE_TMP
 RDS_KEY_POLL_OPTS = 'hole_thu:poll_opts:%s'
 RDS_KEY_POLL_VOTES = 'hole_thu:poll_votes:%s:%s'
 
+RDS_KEY_BLOCK_SET = 'hole_thu:block_list:%s'  # key的参数是name而非namehash，为了方便清理和持续拉黑。拉黑名单不那么敏感，应该可以接受后台实名。value是namehash。
+RDS_KEY_BLOCKED_COUNT = 'hole_thu:blocked_count'  # namehash -> 被拉黑次数
+RDS_KEY_DANGEROUS_USERS = 'hole_thu:dangerous_users'
+
 rds = redis.Redis(**RDS_CONFIG)
 
 
@@ -52,11 +56,14 @@ def hash_name(name):
 
 
 def map_post(p, name, mc=50):
+    blocked = is_blocked(p.name_hash, name)
+    # TODO: 如果未来量大还是sql里not in一下
     r = {
+        'blocked': blocked,
         'pid': p.id,
         'likenum': p.likenum,
         'cw': p.cw,
-        'text': p.content,
+        'text': '' if blocked else p.content,
         'timestamp': p.timestamp,
         'type': p.post_type,
         'url': p.file_url,
@@ -65,7 +72,7 @@ def map_post(p, name, mc=50):
         'attention': check_attention(name, p.id),
         'can_del': check_can_del(name, p.name_hash),
         'allow_search': bool(p.search_text),
-        'poll': gen_poll_dict(p.id, name)
+        'poll': None if blocked else gen_poll_dict(p.id, name)
     }
     if is_admin(name):
         r['hot_score'] = p.hot_score
@@ -98,6 +105,19 @@ def name_with_tmp_limit(name: str) -> str:
         'tmp_') else name
 
 
+def is_blocked(target_name_hash, name):
+    if rds.sismember(RDS_KEY_BLOCK_SET % name, target_name_hash):
+        return True
+    if rds.sismember(
+        RDS_KEY_DANGEROUS_USERS, target_name_hash
+    ) and not (
+        is_admin(name) or rds.sismember(
+            RDS_KEY_DANGEROUS_USERS, hash_name(name))
+    ):
+        return True
+    return False
+
+
 def map_comment(p, name):
 
     names = {p.name_hash: 0}
@@ -108,10 +128,11 @@ def map_comment(p, name):
         return names[nh]
 
     return [{
+        'blocked': (blocked := is_blocked(c.name_hash, name)),
         'cid': c.id,
         'name_id': gen_name_id(c.name_hash),
         'pid': p.id,
-        'text': c.content,
+        'text': '' if blocked else c.content,
         'timestamp': c.timestamp,
         'can_del': check_can_del(name, c.name_hash)
     } for c in p.comments if not (c.deleted and gen_name_id(c.name_hash) >= 0)

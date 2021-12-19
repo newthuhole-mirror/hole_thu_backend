@@ -1,6 +1,8 @@
 import hashlib
 import time
 import redis
+from datetime import date
+
 from flask import request, abort, current_app
 from models import User, Attention, Syslog
 from config import RDS_CONFIG, ADMINS, ENABLE_TMP
@@ -74,7 +76,7 @@ def map_post(p, name, mc=50):
 def gen_poll_dict(pid, name):
     if not rds.exists(RDS_KEY_POLL_OPTS % pid):
         return None
-
+    name = name_with_tmp_limit(name)
     vote = None
     answers = []
     for idx, opt in enumerate(rds.lrange(RDS_KEY_POLL_OPTS % pid, 0, -1)):
@@ -89,6 +91,11 @@ def gen_poll_dict(pid, name):
         'answers': answers,
         'vote': vote
     }
+
+
+def name_with_tmp_limit(name: str) -> str:
+    return 'tmp:%s' % date.today() if name.startswith(
+        'tmp_') else name
 
 
 def map_comment(p, name):

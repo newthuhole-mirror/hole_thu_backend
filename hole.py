@@ -10,7 +10,7 @@ from sqlalchemy.sql.expression import func
 
 from mastodon import Mastodon
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict
+from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -535,6 +535,8 @@ def edit_hot_score():
 @limiter.limit("100 / hour; 1 / 2 second")
 def add_vote():
     username = get_current_username()
+    username = name_with_tmp_limit(username)
+
     pid = request.form.get('pid', type=int)
     vote = request.form.get('vote')
 

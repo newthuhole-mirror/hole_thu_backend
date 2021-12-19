@@ -222,10 +222,18 @@ def do_post():
     poll_options = request.form.getlist('poll_options')
 
     if not content or len(content) > 4096 or len(cw) > 32:
-        abort(422)
+        raise APIError('无内容或超长')
 
     search_text = content.replace(
         '\n', '') if allow_search else ''
+
+    if poll_options and poll_options[0]:
+        if len(poll_options) != len(set(poll_options)):
+            raise APIError('有重复的投票选项')
+        if len(poll_options) > 8:
+            raise APIError('选项过多')
+        if max(map(len, poll_options)) > 32:
+            raise APIError('选项过长')
 
     p = Post(
         name_hash=hash_name(username),
@@ -248,14 +256,8 @@ def do_post():
     db.session.add(Attention(name_hash=hash_name(username), pid=p.id))
     db.session.commit()
 
+    rds.delete(RDS_KEY_POLL_OPTS % p.id)  # 由于历史原因，现在的数据库里发布后删再发布可能导致id重复
     if poll_options and poll_options[0]:
-        if len(poll_options) != len(set(poll_options)):
-            raise APIError('有重复的投票选项')
-        if len(poll_options) > 8:
-            raise APIError('选项过多')
-        if max(map(len, poll_options)) > 32:
-            raise APIError('选项过长')
-        rds.delete(RDS_KEY_POLL_OPTS % p.id)  # 由于历史原因，现在的数据库里发布后删再发布可能导致id重复
         rds.rpush(RDS_KEY_POLL_OPTS % p.id, *poll_options)
 
     return {

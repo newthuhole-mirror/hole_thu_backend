@@ -76,6 +76,9 @@ def map_post(p, name, mc=50):
     }
     if is_admin(name):
         r['hot_score'] = p.hot_score
+        if rds.sismember(RDS_KEY_DANGEROUS_USERS, p.name_hash):
+            r['dangerous_user'] = p.name_hash[:4]
+        r['blocked_count'] = rds.hget(RDS_KEY_BLOCKED_COUNT, p.name_hash)
 
     return r
 
@@ -134,7 +137,12 @@ def map_comment(p, name):
         'pid': p.id,
         'text': '' if blocked else c.content,
         'timestamp': c.timestamp,
-        'can_del': check_can_del(name, c.name_hash)
+        'can_del': check_can_del(name, c.name_hash),
+        **({
+            'dangerous_user': c.name_hash[:4] if rds.sismember(
+                RDS_KEY_DANGEROUS_USERS, c.name_hash) else None,
+            'blocked_count': rds.hget(RDS_KEY_BLOCKED_COUNT, c.name_hash)
+        } if is_admin(name) else {})
     } for c in p.comments if not (c.deleted and gen_name_id(c.name_hash) >= 0)
     ]
 

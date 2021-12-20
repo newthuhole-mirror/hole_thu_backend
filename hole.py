@@ -163,6 +163,30 @@ def get_one():
     }
 
 
+@app.route('/_api/v1/getmulti')
+def get_multi():
+    username = get_current_username()
+    pids = request.args.getlist('pids')
+    pids = pids[:500] or [0]
+
+    posts = Post.query.filter(
+        Post.id.in_(pids)
+    ).filter_by(
+        deleted=False
+    ).order_by(
+        Post.id.desc()
+    ).all()
+
+    data = [map_post(post, username) for post in posts]
+
+    return {
+        'code': 0,
+        'data': data
+    }
+
+
+
+
 @app.route('/_api/v1/search')
 def search():
     username = get_current_username()

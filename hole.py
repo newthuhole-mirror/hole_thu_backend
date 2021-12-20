@@ -250,6 +250,7 @@ def do_post():
     )
 
     db.session.add(p)
+    db.session.commit()
 
     tags = re.findall('(^|\\s)#([^#\\s]{1,32})', content)
     for t in tags:

@@ -399,15 +399,13 @@ def attention():
     if username[:4] == 'tmp_':
         abort(403)
 
-    s = request.form.get('switch')
-    if s not in ['0', '1']:
+    s = request.form.get('switch', type=int)
+    if s not in [0, 1]:
         abort(422)
 
-    pid = get_num(request.form.get('pid'))
+    pid = request.form.get('pid', type=int)
 
-    post = Post.query.get(pid)
-    if not post:
-        abort(404)
+    post = Post.query.get_or_404(pid)
 
     at = Attention.query.filter_by(
         name_hash=hash_name(username), pid=pid
@@ -419,16 +417,19 @@ def attention():
         if post.hot_score != -1:
             post.hot_score += 2
 
-    if(at.disabled != (s == '0')):
-        at.disabled = (s == '0')
-        post.likenum += 1 - 2 * int(s == '0')
+    if at.disabled == bool(s):
+        at.disabled = not bool(s)
+        post.likenum += 2 * s - 1
+
+    if is_admin(username) and s:
+        post.is_reported = False
 
     db.session.commit()
 
     return {
         'code': 0,
         'likenum': post.likenum,
-        'attention': (s == '1')
+        'attention': bool(s)
     }
 
 

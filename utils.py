@@ -82,6 +82,7 @@ def map_post(p, name, mc=50):
         if rds.sismember(RDS_KEY_DANGEROUS_USERS, p.name_hash):
             r['dangerous_user'] = p.name_hash[:4]
         r['blocked_count'] = rds.hget(RDS_KEY_BLOCKED_COUNT, p.name_hash)
+        r['is_reported'] = p.is_reported
 
     return r
 

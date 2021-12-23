@@ -14,6 +14,8 @@ RDS_KEY_BLOCK_SET = 'hole_thu:block_list:%s'  # key的参数是name而非namehas
 RDS_KEY_BLOCKED_COUNT = 'hole_thu:blocked_count'  # namehash -> 被拉黑次数
 RDS_KEY_DANGEROUS_USERS = 'hole_thu:dangerous_users'
 
+RDS_KEY_TITLE = 'hole_thu:title'  # 用户自己设置的专属头衔, namehash -> 头衔
+
 rds = redis.Redis(**RDS_CONFIG)
 
 
@@ -31,7 +33,7 @@ def tmp_token():
     )[5:21]
 
 
-def get_current_username():
+def get_current_username() -> str:
     token = request.headers.get('User-Token') or request.args.get('user_token')
     if not token:
         abort(401)
@@ -72,7 +74,8 @@ def map_post(p, name, mc=50):
         'attention': check_attention(name, p.id),
         'can_del': check_can_del(name, p.name_hash),
         'allow_search': bool(p.search_text),
-        'poll': None if blocked else gen_poll_dict(p.id, name)
+        'poll': None if blocked else gen_poll_dict(p.id, name),
+        'author_title': p.author_title
     }
     if is_admin(name):
         r['hot_score'] = p.hot_score
@@ -134,6 +137,7 @@ def map_comment(p, name):
         'blocked': (blocked := is_blocked(c.name_hash, name)),
         'cid': c.id,
         'name_id': gen_name_id(c.name_hash),
+        'author_title': c.author_title,
         'pid': p.id,
         'text': '' if blocked else c.content,
         'timestamp': c.timestamp,

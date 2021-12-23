@@ -10,7 +10,7 @@ from sqlalchemy.sql.expression import func
 
 from mastodon import Mastodon
 from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit, RDS_KEY_BLOCK_SET, RDS_KEY_BLOCKED_COUNT, RDS_KEY_DANGEROUS_USERS
+from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit, RDS_KEY_BLOCK_SET, RDS_KEY_BLOCKED_COUNT, RDS_KEY_DANGEROUS_USERS, RDS_KEY_TITLE
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -23,7 +23,6 @@ app.config.from_pyfile('config.py')
 
 db.init_app(app)
 migrate = Migrate(app, db)
-
 
 CS_LOGIN_URL = Mastodon(api_base_url=app.config['MASTODON_URL']) \
     .auth_request_url(
@@ -40,9 +39,6 @@ limiter = Limiter(
 
 PER_PAGE = 50
 DANGEROUS_USER_THRESHOLD = 10
-
-# 重置后旧的被拉黑次数可以丢弃了，但其他仍需要保留
-rds.delete(RDS_KEY_BLOCKED_COUNT)
 
 
 class APIError(Exception):
@@ -138,6 +134,7 @@ def get_list():
     return {
         'code': 0,
         'tmp_token': tmp_token(),
+        'custom_title': rds.hget(RDS_KEY_TITLE, hash_name(username)),
         'count': len(data),
         'data': data
     }
@@ -183,8 +180,6 @@ def get_multi():
         'code': 0,
         'data': data
     }
-
-
 
 
 @app.route('/_api/v1/search')
@@ -248,6 +243,7 @@ def do_post():
     post_type = request.form.get('type')
     cw = request.form.get('cw', '').strip()
     poll_options = request.form.getlist('poll_options')
+    use_title = request.form.get('use_title')
 
     if not content or len(content) > 4096 or len(cw) > 32:
         raise APIError('无内容或超长')
@@ -263,8 +259,10 @@ def do_post():
         if max(map(len, poll_options)) > 32:
             raise APIError('选项过长')
 
+    name_hash = hash_name(username)
     p = Post(
-        name_hash=hash_name(username),
+        name_hash=name_hash,
+        author_title=rds.hget(RDS_KEY_TITLE, name_hash) if use_title else None,
         content=content,
         search_text=search_text,
         post_type=post_type,
@@ -351,14 +349,18 @@ def do_comment():
     if post.deleted and not check_can_del(username, post.name_hash):
         abort(451)
 
-    content = request.form.get('text')
-    content = content.strip() if content else None
-    content = '[tmp]\n' + content if username[:4] == 'tmp_' else content
+    content = request.form.get('text', '').strip()
+    if username.startswith('tmp_'):
+        content = '[tmp]\n' + content
     if not content or len(content) > 4096:
         abort(422)
 
+    use_title = request.form.get('use_title')
+
+    name_hash = hash_name(username)
     c = Comment(
-        name_hash=hash_name(username),
+        name_hash=name_hash,
+        author_title=rds.hget(RDS_KEY_TITLE, name_hash) if use_title else None,
         content=content,
     )
     post.comments.append(c)
@@ -518,6 +520,7 @@ def system_log():
         'start_time': app.config['START_TIME'],
         'salt': look(app.config['SALT']),
         'tmp_token': tmp_token(),
+        'custom_title': rds.hget(RDS_KEY_TITLE, hash_name(username)),
         'data': [map_syslog(s, username) for s in ss]
     }
 
@@ -625,6 +628,24 @@ def block_user_by_target():
             'threshold': DANGEROUS_USER_THRESHOLD
         }
     }
+
+
+@app.route('/_api/v1/title', methods=['POST'])
+@limiter.limit("10 / hour; 1 / 2 second")
+def set_title():
+    username = get_current_username()
+
+    title = request.form.get('title')
+    if not title:
+        rds.hdel(RDS_KEY_TITLE, hash_name(username))
+    else:
+        if len(title) > 10:
+            raise APIError('自定义头衔太长')
+        if title in rds.hvals(RDS_KEY_TITLE):  # 如果未来量大还是另外用个set维护
+            raise APIError('已经被使用了')
+        rds.hset(RDS_KEY_TITLE, hash_name(username), title)
+
+    return {'code': 0}
 
 
 if __name__ == '__main__':

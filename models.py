@@ -18,6 +18,7 @@ class Post(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name_hash = db.Column(db.String(64))
+    author_title = db.Column(db.String(10))
     content = db.Column(db.String(4096))
     search_text = db.Column(db.String(4096), default='', index=True)
     post_type = db.Column(db.String(8))
@@ -44,6 +45,7 @@ class Post(db.Model):
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name_hash = db.Column(db.String(64))
+    author_title = db.Column(db.String(10))
     content = db.Column(db.String(4096))
     timestamp = db.Column(db.Integer)
     deleted = db.Column(db.Boolean, default=False)

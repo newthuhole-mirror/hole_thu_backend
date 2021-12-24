@@ -15,3 +15,5 @@ RDS_CONFIG = {
     'port': 6379,
     'decode_responses': True
 }
+SEARCH_DB = 'hole_search.db'
+EXT_SIMPLE_URL = 'libsimple/libsimple'

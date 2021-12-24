@@ -1,5 +1,6 @@
 /backup/
 /.venv/
+/libsimple
 
 __pycache__/
 *.pyc

@@ -69,11 +69,11 @@ def map_post(p, name, mc=50):
         'timestamp': p.timestamp,
         'type': p.post_type,
         'url': p.file_url,
-        'reply': len(p.comments),
-        'comments': map_comment(p, name) if len(p.comments) < mc else None,
+        'reply': p.n_comments,
+        'comments': map_comments(p, name) if p.n_comments < mc else None,
         'attention': check_attention(name, p.id),
         'can_del': check_can_del(name, p.name_hash),
-        'allow_search': bool(p.search_text),
+        'allow_search': p.allow_search,
         'poll': None if blocked else gen_poll_dict(p.id, name),
         'author_title': p.author_title
     }
@@ -125,7 +125,7 @@ def is_blocked(target_name_hash, name):
     return False
 
 
-def map_comment(p, name):
+def map_comments(p, name):
 
     names = {p.name_hash: 0}
 

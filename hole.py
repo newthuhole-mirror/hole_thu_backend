@@ -9,8 +9,8 @@ from flask_migrate import Migrate
 from sqlalchemy.sql.expression import func
 
 from mastodon import Mastodon
-from models import db, User, Post, Comment, Attention, TagRecord, Syslog
-from utils import get_current_username, map_post, map_comment, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit, RDS_KEY_BLOCK_SET, RDS_KEY_BLOCKED_COUNT, RDS_KEY_DANGEROUS_USERS, RDS_KEY_TITLE
+from models import db, User, Post, Comment, Attention, TagRecord, Syslog, SearchDB
+from utils import get_current_username, map_post, map_comments, map_syslog, check_attention, hash_name, look, get_num, tmp_token, is_admin, check_can_del, rds, RDS_KEY_POLL_OPTS, RDS_KEY_POLL_VOTES, gen_poll_dict, name_with_tmp_limit, RDS_KEY_BLOCK_SET, RDS_KEY_BLOCKED_COUNT, RDS_KEY_DANGEROUS_USERS, RDS_KEY_TITLE
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hole.db'
@@ -187,43 +187,74 @@ def search():
     username = get_current_username()
 
     page = request.args.get('page', type=int, default=1)
-    pagesize = min(request.args.get('pagesize', type=int, default=200), 200)
-    keywords = request.args.get('keywords')
+    search_mode = request.args.get('search_mode', type=int)
+    pagesize = min(request.args.get('pagesize', type=int, default=PER_PAGE), 2 * PER_PAGE)
+    keywords = request.args.get('keywords', '').strip()
+
     if not keywords:
-        abort(422)
+        raise APIError("搜索词不可为空")
+    if search_mode is None:
+        raise APIError("请点击“强制检查更新”，更新网页到最新版")
 
-    tag_pids = TagRecord.query.with_entities(
-        TagRecord.pid
-    ).filter_by(
-        tag=keywords
-    ).all()
+    data = []
 
-    tag_pids = [
-        tag_pid for tag_pid, in tag_pids] or [0]  # sql not allowed empty in
-
-    posts = Post.query.filter(
-        Post.search_text.like("%{}%".format(keywords))
-    ).filter(
-        Post.id.notin_(tag_pids)
-    ).filter_by(
-        deleted=False, is_reported=False
-    ).order_by(
-        Post.id.desc()
-    ).limit(pagesize).offset((page - 1) * pagesize).all()
-
-    if page == 1:
-        posts = Post.query.filter(
-            Post.id.in_(tag_pids)
+    if search_mode == 0:  # tag 搜索
+        tag_pids = TagRecord.query.with_entities(
+            TagRecord.pid
         ).filter_by(
+            tag=keywords
+        ).limit(pagesize).offset((page - 1) * pagesize).all()
+
+        tag_pids = [
+            tag_pid for tag_pid, in tag_pids] or [0]  # sql not allowed empty in
+
+        posts = Post.query.filter(Post.id.in_(tag_pids)).filter_by(
+            deleted=False, is_reported=False
+        ).order_by(Post.id.desc()).all()
+
+        data = [
+            map_post(post, username)
+            for post in posts
+        ]
+    elif search_mode == 1:  # 全文搜索
+        search_db = SearchDB()
+        for highlighted_content, obj_type, obj_id in search_db.query(
+            keywords, pagesize, (page - 1) * pagesize
+        ):
+            if obj_type == 'post':
+                obj = Post.query.get(obj_id)
+            else:
+                obj = Comment.query.get(obj_id)
+            if not obj or obj.deleted:
+                continue
+            if obj_type == 'post':
+                post = obj
+            else:
+                post = obj.post
+            if not post or post.deleted or post.is_reported:
+                continue
+            obj.content = highlighted_content
+            if obj_type == 'post':
+                post_dict = map_post(post, username)
+            else:
+                post_dict = map_post(post, username, 1000)
+                post_dict['comments'] = [
+                    c for c in post_dict['comments'] if c['cid'] == obj_id
+                ]
+
+            post_dict['key'] = "search_%s_%s" % (obj_type, obj_id)
+            data.append(post_dict)
+        del search_db
+    elif search_mode == 2:  # 头衔
+        posts = Post.query.filter_by(author_title=keywords).filter_by(
             deleted=False, is_reported=False
         ).order_by(
             Post.id.desc()
-        ).all() + posts
-
-    data = [
-        map_post(post, username)
-        for post in posts
-    ]
+        ).limit(pagesize).offset((page - 1) * pagesize).all()
+        data = [
+            map_post(post, username)
+            for post in posts
+        ]
 
     return {
         'code': 0,
@@ -248,9 +279,6 @@ def do_post():
     if not content or len(content) > 4096 or len(cw) > 32:
         raise APIError('无内容或超长')
 
-    search_text = content.replace(
-        '\n', '') if allow_search else ''
-
     if poll_options and poll_options[0]:
         if len(poll_options) != len(set(poll_options)):
             raise APIError('有重复的投票选项')
@@ -264,7 +292,7 @@ def do_post():
         name_hash=name_hash,
         author_title=rds.hget(RDS_KEY_TITLE, name_hash) if use_title else None,
         content=content,
-        search_text=search_text,
+        allow_search=bool(allow_search),
         post_type=post_type,
         cw=cw or None,
         likenum=1,
@@ -282,6 +310,12 @@ def do_post():
 
     db.session.add(Attention(name_hash=hash_name(username), pid=p.id))
     db.session.commit()
+
+    if allow_search:
+        search_db = SearchDB()
+        search_db.insert(content, 'post', p.id)
+        search_db.commit()
+        del search_db
 
     rds.delete(RDS_KEY_POLL_OPTS % p.id)  # 由于历史原因，现在的数据库里发布后删再发布可能导致id重复
     if poll_options and poll_options[0]:
@@ -326,7 +360,7 @@ def get_comment():
     if post.deleted and not check_can_del(username, post.name_hash):
         abort(451)
 
-    data = map_comment(post, username)
+    data = map_comments(post, username)
 
     return {
         'code': 0,
@@ -365,6 +399,7 @@ def do_comment():
     )
     post.comments.append(c)
     post.comment_timestamp = c.timestamp
+    post.n_comments += 1
 
     if post.hot_score != -1:
         post.hot_score += 1
@@ -386,6 +421,12 @@ def do_comment():
 
     db.session.commit()
 
+    if post.allow_search:
+        search_db = SearchDB()
+        search_db.insert(content, 'comment', c.id)
+        search_db.commit()
+        del search_db
+
     return {
         'code': 0,
         'data': pid
@@ -397,7 +438,7 @@ def do_comment():
 def attention():
     username = get_current_username()
     if username[:4] == 'tmp_':
-        abort(403)
+        raise APIError('临时用户无法手动关注')
 
     s = request.form.get('switch', type=int)
     if s not in [0, 1]:
@@ -474,23 +515,30 @@ def delete():
     if note and len(note) > 100:
         abort(422)
 
-    obj = None
+    # 兼容
     if obj_type == 'pid':
-        obj = Post.query.get(obj_id)
+        obj_type = 'post'
     elif obj_type == 'cid':
+        obj_type = 'comment'
+
+    obj = None
+    if obj_type == 'post':
+        obj = Post.query.get(obj_id)
+    elif obj_type == 'comment':
         obj = Comment.query.get(obj_id)
     if not obj:
         abort(404)
 
     if obj.name_hash == hash_name(username):
-        if obj_type == 'pid':
-            if len(obj.comments):
-                abort(403)
+        if obj_type == 'post':
+            if obj.n_comments:
+                abort("已经有评论了")
             Attention.query.filter_by(pid=obj.id).delete()
             TagRecord.query.filter_by(pid=obj.id).delete()
             db.session.delete(obj)
         else:
             obj.deleted = True
+
     elif username in app.config.get('ADMINS'):
         obj.deleted = True
         db.session.add(Syslog(
@@ -506,6 +554,9 @@ def delete():
             ))
     else:
         abort(403)
+
+    if obj_type == 'comment':
+        obj.post.n_comments -= 1
 
     db.session.commit()
     return {'code': 0}

@@ -201,8 +201,8 @@ def search():
     if search_mode == 0:  # tag 搜索
         tag_pids = TagRecord.query.with_entities(
             TagRecord.pid
-        ).filter_by(
-            tag=keywords
+        ).filter_by(tag=keywords).order_by(
+            TagRecord.pid.desc()
         ).limit(pagesize).offset((page - 1) * pagesize).all()
 
         tag_pids = [
